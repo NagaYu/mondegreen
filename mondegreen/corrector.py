@@ -381,6 +381,15 @@ class ConstrainedCorrector:
         # the beam.  Claim: LOCAL-SPEED.
         needs_variants = bool(getattr(self.reader, "needs_variants", True))
         max_variants = cfg.max_reading_variants if needs_variants else 1
+        # Without a morphological analyser there is no way to tell 稼働 (ordinary
+        # word, must not be rewritten) from 進藤 (proper noun, the whole point).
+        # Rather than warn and do damage, degrade the *constraint*: with no POS,
+        # a kanji span may only be replaced by a near-exact homophone. That still
+        # recovers 進藤 -> 新藤 (distance 0.000) and 両氏誤り訂正 -> 量子誤り訂正
+        # (0.000) while refusing 稼働 -> 加藤 (0.060). Katakana spans keep the
+        # normal bound, because katakana is how ASR renders the unknown proper
+        # nouns a glossary exists for.
+        pos_available = bool(getattr(self.reader, "has_pos", False))
         counters = {"enumerated": 0, "screened_out": 0, "queried": 0}
         proposals: List[_SpanProposal] = []
         n = len(tokens)
@@ -418,12 +427,15 @@ class ConstrainedCorrector:
                     len(span_tokens) > 1
                     and all(t.kind == "katakana" for t in span_tokens)
                 )
-                span_common = (
-                    bool(span_tokens)
-                    and not katakana_compound
-                    and all(is_common_word(t) or is_boundary_blocked(t) for t in span_tokens)
-                    and not any(is_proper_noun(t) for t in span_tokens)
-                )
+                if pos_available:
+                    span_common = (
+                        bool(span_tokens)
+                        and not katakana_compound
+                        and all(is_common_word(t) or is_boundary_blocked(t) for t in span_tokens)
+                        and not any(is_proper_noun(t) for t in span_tokens)
+                    )
+                else:
+                    span_common = any(t.kind == "kanji" for t in span_tokens)
                 span_proper = any(is_proper_noun(t) for t in span_tokens)
 
                 if cfg.protect_glossary_surfaces and self.index.has_surface(span_text):

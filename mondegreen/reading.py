@@ -155,6 +155,10 @@ class FallbackReader:
 
     name = "fallback"
     needs_variants = True
+    #: No morphological analysis, so no part of speech. The corrector compensates
+    #: by demanding near-exact homophony on kanji spans -- see
+    #: :meth:`~mondegreen.corrector.ConstrainedCorrector._propose`.
+    has_pos = False
 
     def tokenize(self, text: str) -> List[Token]:
         """Split ``text`` into reading-bearing tokens.
@@ -204,6 +208,7 @@ class FugashiReader:
 
     name = "fugashi"
     needs_variants = False
+    has_pos = True
 
     def __init__(self) -> None:
         """Initialise the reader backend.
@@ -257,6 +262,7 @@ class PyOpenJTalkReader:
 
     name = "pyopenjtalk"
     needs_variants = False
+    has_pos = True
 
     def __init__(self) -> None:
         """Initialise the reader backend.
@@ -343,34 +349,36 @@ def span_reading_variants(
 ) -> Tuple[str, ...]:
     """Enumerate plausible kana readings for ``tokens[i:j]``, best first.
 
-    A multi-kanji span is genuinely ambiguous (中 is ナカ or チュウ), so we take a
-    small beam over per-character readings rather than committing to one.
-    Variants are ranked by the summed rank of the per-character readings they
-    use, so "every character's first reading" comes first and the long tail of
-    exotic combinations is truncated -- every extra variant is another chance to
-    match a glossary term by accident.
+    A multi-kanji span is genuinely ambiguous (中 is ナカ or チュウ, 正 is マサ or
+    セイ), so we take a beam rather than committing to one reading.
 
-    Claim: TERM-RECALL (ambiguity is resolved in favour of finding the term) and
-    LOW-DAMAGE (the rank-ordered cap keeps the false-match surface area small).
+    The two sources of variation are kept on **separate axes**, and that matters.
+    Sequential voicing (rendaku: 小林 = コ + *バ*ヤシ) applies to almost every
+    token, so mixing it into the same ranking as alternate base readings lets
+    rendaku forms of the top reading crowd out genuine alternatives. Measured:
+    with a single mixed beam, 「両氏誤り訂正」 needed 20 variants before the
+    correct リョウシアヤマリテイセイ appeared, because rendaku forms of the wrong
+    base reading occupied the first 19 slots. Ranking base combinations first and
+    only then expanding rendaku finds it within 12 — at less than half the index
+    queries.
+
+    Claim: TERM-RECALL (the correct reading has to be reachable) and LOCAL-SPEED
+    (every extra variant is another index query per span).
     """
+    # --- axis 1: base readings ------------------------------------------
     beam: List[Tuple[str, int]] = [("", 0)]
-    hard_cap = max(max_variants * 6, 48)
+    hard_cap = max(max_variants * 4, 32)
     for idx in range(i, j):
         tok = tokens[idx]
         if tok.kind in ("punct", "space"):
             return ()
-        ranked: List[Tuple[str, int]] = []
-        base_readings = list(tok.readings[:per_token]) if tok.readings else []
-        if not base_readings:
-            base_readings = ["?" * max(1, len(tok.surface))]
-        for rank, r in enumerate(base_readings):
-            forms = rendaku_variants(r) if (apply_rendaku and idx > i) else (r,)
-            for k, form in enumerate(forms):
-                ranked.append((form, rank * 2 + k))
+        readings = list(tok.readings[:per_token]) if tok.readings else []
+        if not readings:
+            readings = ["?" * max(1, len(tok.surface))]
         nxt: List[Tuple[str, int]] = []
         for base, brank in beam:
-            for form, frank in ranked:
-                nxt.append((base + form, brank + frank))
+            for rank, form in enumerate(readings):
+                nxt.append((base + form, brank + rank))
         nxt.sort(key=lambda x: x[1])
         seen: Dict[str, int] = {}
         for text, rank in nxt:
@@ -379,7 +387,35 @@ def span_reading_variants(
             if len(seen) >= hard_cap:
                 break
         beam = sorted(seen.items(), key=lambda x: x[1])[:hard_cap]
-    return tuple(text for text, _ in beam[:max_variants] if text)
+
+    ordered = [t for t, _ in beam if t][:max_variants]
+    if not apply_rendaku:
+        return tuple(ordered)
+
+    # --- axis 2: rendaku, applied to the surviving base combinations -----
+    out: List[str] = []
+    seen_out: Dict[str, None] = {}
+
+    def _add(v: str) -> None:
+        if v and v not in seen_out:
+            seen_out[v] = None
+            out.append(v)
+
+    for v in ordered:
+        _add(v)
+    for idx in range(i + 1, j):
+        tok = tokens[idx]
+        base = tok.readings[0] if tok.readings else ""
+        voiced = rendaku_variants(base)
+        if len(voiced) < 2:
+            continue
+        for v in list(ordered):
+            pos = v.find(base)
+            if pos >= 0:
+                _add(v[:pos] + voiced[1] + v[pos + len(base):])
+        if len(out) >= max_variants * 2:
+            break
+    return tuple(out[: max_variants * 2])
 
 
 def text_to_reading(text: str, reader=None) -> str:

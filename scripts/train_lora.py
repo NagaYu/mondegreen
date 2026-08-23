@@ -117,8 +117,8 @@ def build_examples(
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--pairs", required=True)
-    ap.add_argument("--glossary", required=True)
+    ap.add_argument("--pairs")
+    ap.add_argument("--glossary")
     ap.add_argument("--base", default="Qwen/Qwen2.5-0.5B",
                     help="small base LM; must be convertible to GGUF and MLX")
     ap.add_argument("--out", default="models/lora")
@@ -136,28 +136,42 @@ def main() -> int:
     ap.add_argument("--lora-r", type=int, default=16)
     ap.add_argument("--lora-alpha", type=int, default=32)
     ap.add_argument("--lora-dropout", type=float, default=0.05)
-    ap.add_argument("--max-seq-len", type=int, default=512)
+    ap.add_argument("--max-seq-len", type=int, default=192,
+                    help="prompts are short (p95 ~126 chars); 192 tokens is ample "
+                         "and 512 just pads compute away")
     ap.add_argument("--seed", type=int, default=20260823)
+    ap.add_argument("--examples", help="reuse a previously built train_examples.jsonl "
+                    "instead of rebuilding it (building is the slow part: ~9 min for "
+                    "6,000 pairs against a 9,000-term glossary)")
     ap.add_argument("--dry-run", action="store_true",
                     help="build and report the dataset, then stop (no torch needed)")
     ap.add_argument("--push-to", help="HF model repo id")
     args = ap.parse_args()
+    if not args.examples and not (args.pairs and args.glossary):
+        ap.error("give --examples, or both --pairs and --glossary")
 
-    print(f"[1/4] loading {args.pairs}")
-    pairs = [p for p in read_jsonl(args.pairs) if p.split == "train"]
-    glossary = load_glossary(args.glossary)
-    print(f"      {len(pairs)} train pairs, {len(glossary)} glossary terms")
-
-    print("[2/4] building re-ranking examples (ambiguous spans only)")
-    examples = build_examples(
-        pairs, glossary, args.tau, args.max_examples,
-        candidate_tau=args.candidate_tau, candidate_max_raw=args.candidate_max_raw,
-    )
     os.makedirs(args.out, exist_ok=True)
-    with open(os.path.join(args.out, "train_examples.jsonl"), "w", encoding="utf-8") as fh:
-        for ex in examples:
-            fh.write(json.dumps(ex, ensure_ascii=False) + "\n")
-    print(f"      {len(examples)} examples -> {args.out}/train_examples.jsonl")
+    if args.examples:
+        print(f"[1/4] reusing examples from {args.examples}")
+        with open(args.examples, encoding="utf-8") as fh:
+            examples = [json.loads(l) for l in fh if l.strip()]
+        print(f"      {len(examples)} examples")
+    else:
+        print(f"[1/4] loading {args.pairs}", flush=True)
+        pairs = [p for p in read_jsonl(args.pairs) if p.split == "train"]
+        glossary = load_glossary(args.glossary)
+        print(f"      {len(pairs)} train pairs, {len(glossary)} glossary terms", flush=True)
+
+        print("[2/4] building re-ranking examples (ambiguous spans only) -- this is "
+              "the slow step", flush=True)
+        examples = build_examples(
+            pairs, glossary, args.tau, args.max_examples,
+            candidate_tau=args.candidate_tau, candidate_max_raw=args.candidate_max_raw,
+        )
+        with open(os.path.join(args.out, "train_examples.jsonl"), "w", encoding="utf-8") as fh:
+            for ex in examples:
+                fh.write(json.dumps(ex, ensure_ascii=False) + "\n")
+        print(f"      {len(examples)} examples -> {args.out}/train_examples.jsonl", flush=True)
     if not examples:
         print("      no ambiguous spans found even at the widened training bound: "
               "the phonetic constraint resolves every case in this corpus, so there "
@@ -179,13 +193,23 @@ def main() -> int:
         print(f"  need: pip install 'mondegreen[train]'  ({exc})", file=sys.stderr)
         return 1
 
+    # Device selection matters a lot here: on Apple silicon the Trainer will
+    # happily sit on the CPU and take four hours for what MPS does in twenty
+    # minutes. bf16 on MPS is still flaky in torch, so MPS gets fp32.
+    if torch.cuda.is_available():
+        device, dtype = "cuda", torch.bfloat16
+    elif torch.backends.mps.is_available():
+        device, dtype = "mps", torch.float32
+    else:
+        device, dtype = "cpu", torch.float32
+    print(f"      device: {device} ({dtype})", flush=True)
+
     tokenizer = AutoTokenizer.from_pretrained(args.base)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
-    model = AutoModelForCausalLM.from_pretrained(
-        args.base,
-        dtype=torch.bfloat16 if torch.cuda.is_available() else torch.float32,
-    )
+    model = AutoModelForCausalLM.from_pretrained(args.base, dtype=dtype)
+    if device != "cpu":
+        model = model.to(device)
     peft_config = LoraConfig(
         r=args.lora_r, lora_alpha=args.lora_alpha, lora_dropout=args.lora_dropout,
         bias="none", task_type="CAUSAL_LM",
@@ -205,9 +229,11 @@ def main() -> int:
             gradient_accumulation_steps=args.grad_accum,
             max_length=args.max_seq_len,
             logging_steps=25,
-            save_strategy="epoch",
+            save_strategy="no",
             seed=args.seed,
             report_to=[],
+            use_cpu=(device == "cpu"),
+            dataloader_num_workers=0,
         ),
     )
     trainer.train()

@@ -30,10 +30,17 @@ Mondegreen は**後処理**でそれを直します。ローカルで、音を�
 
 </div>
 
+<p align="center">
+<a href="https://huggingface.co/spaces/NagaYu/mondegreen"><b>🤗 デモ（ブラウザ内で動作）</b></a> &nbsp;·&nbsp;
+<a href="https://huggingface.co/NagaYu/mondegreen"><b>Model</b></a> &nbsp;·&nbsp;
+<a href="https://huggingface.co/datasets/NagaYu/mondegreen-asr-errors"><b>Dataset</b></a> &nbsp;·&nbsp;
+<a href="https://github.com/NagaYu/mondegreen"><b>GitHub</b></a>
+</p>
+
 ---
 
 ```bash
-pip install mondegreen
+pip install 'git+https://github.com/NagaYu/mondegreen#egg=mondegreen[g2p]'
 mondegreen fix transcript.txt --glossary terms.csv
 ```
 
@@ -353,6 +360,24 @@ make bench           # 条件 (A)-(E) + 図
 make app             # Gradio Space をローカル起動
 make demo            # README の例をそのまま実行
 ```
+
+## 公開物 / Published artefacts
+
+| | | |
+| --- | --- | --- |
+| **Space** | [huggingface.co/spaces/NagaYu/mondegreen](https://huggingface.co/spaces/NagaYu/mondegreen) | **ブラウザ内で完結**するデモ。Pyodide 上で動作し、入力はサーバーに送られません |
+| **Model** | [huggingface.co/NagaYu/mondegreen](https://huggingface.co/NagaYu/mondegreen) | 較正済み保守ゲート + 候補リランカの LoRA + 量子化書き出し |
+| **Dataset** | [huggingface.co/datasets/NagaYu/mondegreen-asr-errors](https://huggingface.co/datasets/NagaYu/mondegreen-asr-errors) | (誤り, 正解) 対 9,000 件、病理ラベル付き、互いに素な用語集 2 種 |
+| **Code** | [github.com/NagaYu/mondegreen](https://github.com/NagaYu/mondegreen) | Apache-2.0 |
+
+Space は Gradio ではなく **Pyodide を直接**駆動しています。理由は 2 つあり、どちらも
+`scripts/build_static_space.py` の docstring に測定結果付きで書いてあります —
+サーバー付き Gradio Space が有料になったこと、そして `@gradio/lite` が HF の静的 Space 上では
+`SharedArrayBuffer` が無いため起動しないこと。結果的にこちらの方がこのプロジェクトには
+正直な配置になりました: **用語集が HF のサーバーにすら届きません。**
+
+ブラウザ版は形態素解析器を使えないため、**制約側を厳しくして**（漢字スパンはほぼ完全な
+同音異義語のみ）対応しています。破壊率を上げずに再現率だけが少し下がります。
 
 ## 引用 / Citation
 
