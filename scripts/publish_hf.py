@@ -287,13 +287,26 @@ def publish_model(api, user: str, repo: str, bench: Dict[str, object], private: 
             shutil.copy(gate_src, os.path.join(tmp, "gate.json"))
             artefacts.append("gate.json — the calibrated conservative gate (3 KB, ships with the package)")
         lora = os.path.join(REPO_ROOT, "models/lora")
-        if os.path.isdir(lora):
-            dst = os.path.join(tmp, "lora")
+        # Only publish `lora/` if it actually holds adapter weights. The directory
+        # is also where training examples land, and shipping those under `lora/`
+        # in a *model* repo would advertise an adapter that does not exist.
+        # Training data belongs in the Dataset repo.
+        has_adapter = os.path.isdir(lora) and any(
+            os.path.exists(os.path.join(lora, f))
+            for f in ("adapter_model.safetensors", "adapter_model.bin", "adapter_config.json")
+        )
+        if has_adapter:
             shutil.copytree(
-                lora, dst,
-                ignore=shutil.ignore_patterns("checkpoint-*", "runs", "*.log", "optimizer.pt"),
+                lora, os.path.join(tmp, "lora"),
+                ignore=shutil.ignore_patterns(
+                    "checkpoint-*", "runs", "*.log", "optimizer.pt",
+                    "train_examples.jsonl",
+                ),
             )
             artefacts.append("lora/ — LoRA adapter for the candidate re-ranker (Qwen2.5-0.5B base)")
+        elif os.path.isdir(lora):
+            print("  no adapter weights in models/lora — skipping (training data is "
+                  "published with the dataset instead)")
         quant = os.path.join(REPO_ROOT, "models/quantized")
         if os.path.isdir(quant):
             for name in sorted(os.listdir(quant)):
@@ -358,6 +371,13 @@ def publish_dataset(api, user: str, repo: str, data_dir: str, private: bool) -> 
         if os.path.exists(src):
             api.upload_file(path_or_fileobj=src, path_in_repo=name,
                             repo_id=repo_id, repo_type="dataset")
+    # The re-ranker's training examples are derived data, not weights: they belong
+    # next to the pairs they came from, not in the model repo.
+    examples = os.path.join(REPO_ROOT, "models/lora/train_examples.jsonl")
+    if os.path.exists(examples):
+        api.upload_file(path_or_fileobj=examples,
+                        path_in_repo="reranker_train_examples.jsonl",
+                        repo_id=repo_id, repo_type="dataset")
     return f"https://huggingface.co/datasets/{repo_id}"
 
 
