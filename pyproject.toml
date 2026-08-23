@@ -1,0 +1,62 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mondegreen"
+version = "0.1.0"
+description = "Local ASR post-correction that turns a private glossary into a hard phonetic constraint."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "Apache-2.0" }
+authors = [{ name = "Mondegreen contributors" }]
+keywords = ["asr", "whisper", "japanese", "phonetics", "post-correction", "constrained-decoding"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "License :: OSI Approved :: Apache Software License",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+
+# The core (phonetics, index, corrector, gate, metrics, CLI) has NO hard third-party
+# dependency beyond numpy.  Every heavy component is optional and lazily imported so
+# that `mondegreen fix` runs on a laptop with a bare Python install.
+dependencies = ["numpy>=1.23"]
+
+[project.optional-dependencies]
+# Japanese grapheme-to-phoneme.  Without these, mondegreen falls back to the bundled
+# kana rules + a compact kanji reading table (see mondegreen/data/kanji_readings.json).
+g2p = ["pyopenjtalk>=0.3", "fugashi>=1.3", "unidic-lite>=1.0"]
+# ErrorHarvester: TTS -> degradation -> ASR round trip.
+harvest = ["faster-whisper>=1.0", "soundfile>=0.12", "librosa>=0.10", "scipy>=1.10", "datasets>=2.16", "huggingface_hub>=0.23"]
+# LoRA training / merging.
+train = ["torch>=2.1", "transformers>=4.40", "peft>=0.10", "trl>=0.9", "datasets>=2.16", "accelerate>=0.30"]
+# Grammar-constrained decoding for the neural reranker (the hard constraint itself is
+# enforced structurally and does not require these).
+constrain = ["outlines>=0.1", "xgrammar>=0.1"]
+# Quantized local runtimes.
+local = ["llama-cpp-python>=0.2", "mlx-lm>=0.14"]
+figures = ["matplotlib>=3.7"]
+app = ["gradio>=4.0"]
+dev = ["pytest>=7.4", "scikit-learn>=1.3", "matplotlib>=3.7"]
+all = ["mondegreen[g2p,harvest,train,constrain,local,figures,app,dev]"]
+
+[project.scripts]
+mondegreen = "mondegreen.cli:main"
+
+[project.urls]
+Homepage = "https://huggingface.co/spaces/mondegreen/mondegreen"
+Source = "https://github.com/mondegreen/mondegreen"
+
+[tool.setuptools.packages.find]
+include = ["mondegreen*"]
+
+[tool.setuptools.package-data]
+mondegreen = ["data/*.json"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+markers = [
+  "slow: requires heavy optional dependencies (whisper / torch / TTS)",
+  "invariant: guards a claim that must never regress",
+]

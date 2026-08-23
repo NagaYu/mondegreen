@@ -1,0 +1,7 @@
+* text=auto eol=lf
+*.png binary
+*.svg text
+*.gguf binary filter=lfs diff=lfs merge=lfs -text
+*.safetensors binary filter=lfs diff=lfs merge=lfs -text
+mondegreen/data/*.json linguist-generated=true
+benchmarks/results/*.json linguist-generated=true

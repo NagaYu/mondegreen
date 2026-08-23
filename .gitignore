@@ -1,0 +1,28 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.DS_Store
+# Harvest artefacts are large and fully regenerable; they belong on the Hub as a
+# Dataset, not in git. `make data` rebuilds them; scripts/harvest_errors.py
+# --push-to publishes them.
+/data/
+outputs/
+*.wav
+*.flac
+
+# Model weights belong on the Hub as a Model repo, not in git.
+/models/lora/
+/models/quantized/
+/models/merged*/
+*.gguf
+*.safetensors
+llama.cpp/
+
+# The trained gate is small (3 KB), interpretable JSON and is *shipped* -- the
+# CLI and the Space load it by default. It stays in git on purpose.
+!models/gate.json
+
+benchmarks/results/*.local.json

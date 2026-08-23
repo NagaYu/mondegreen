@@ -1,0 +1,8 @@
+# Hugging Face Space runtime.
+# The Space only needs the correction path — no training, no TTS, no ASR.
+numpy>=1.23
+gradio>=4.0
+# Japanese G2P. Without these the fallback reading table is used, which has no
+# part-of-speech information and therefore a measurably higher damage rate.
+fugashi>=1.3
+unidic-lite>=1.0

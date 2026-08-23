@@ -1,0 +1,23 @@
+cff-version: 1.2.0
+title: "Mondegreen: private glossaries as hard phonetic constraints for local ASR correction"
+message: "If you use this software, please cite it as below."
+type: software
+authors:
+  - alias: NagaYu
+repository-code: "https://github.com/NagaYu/mondegreen"
+license: Apache-2.0
+version: 0.1.0
+date-released: "2026-08-23"
+keywords:
+  - speech recognition
+  - error correction
+  - japanese
+  - phonetics
+  - constrained decoding
+  - on-device
+abstract: >-
+  Mondegreen compiles a private glossary into a phonetic index and expresses ASR
+  correction as a span replacement that is structurally unable to leave the
+  glossary or to exceed a weighted phonetic edit-distance bound. It targets the
+  case where the audio cannot be uploaded, and treats the rate at which
+  already-correct text is broken as the primary metric.
